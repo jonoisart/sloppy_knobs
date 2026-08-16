@@ -31,7 +31,7 @@ const UNITS: Unit[] = ['khz', 'hz', 'ms', 'db', 'st', 's', '%'];
 
 const isDigit = (c: string) => c >= '0' && c <= '9';
 const isWordStart = (c: string) => /[A-Za-z_]/.test(c);
-const isWordChar = (c: string) => /[A-Za-z0-9_\-]/.test(c);
+const isWordChar = (c: string) => /[A-Za-z0-9_-]/.test(c);
 
 export interface LexResult {
   tokens: Token[];

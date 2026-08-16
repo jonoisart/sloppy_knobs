@@ -1,122 +1,94 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState } from 'react';
+import { StudioProvider } from './state/studio';
+import { useStudio } from './state/context';
+import { Editor } from './ui/Editor';
+import { Library } from './ui/Library';
+import { Rack } from './ui/Rack';
+import { Transport } from './ui/Transport';
 
-function App() {
-  const [count, setCount] = useState(0)
+/**
+ * Browsers refuse to start audio outside a user gesture, so the app opens
+ * behind this gate rather than silently failing to make any sound.
+ */
+function WakeGate() {
+  const { engineState, boot, bootError } = useStudio();
+  if (engineState === 'ready') return null;
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
+    <div className="gate">
+      <div className="gate-card">
+        <h1>sloppy_knobs</h1>
+        <p>
+          An audio coding language with knobs on. Drop in voice notes and found sound, then mangle them with a
+          patch you can read.
+        </p>
+        <button type="button" onClick={() => void boot()} disabled={engineState === 'starting'}>
+          {engineState === 'starting' ? 'waking…' : 'wake up'}
         </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+        {bootError && <p className="warn">{bootError}</p>}
+        <p className="dim">Nothing you load leaves this device.</p>
+      </div>
+    </div>
+  );
 }
 
-export default App
+type View = 'rack' | 'code';
+
+function Studio() {
+  const { ready } = useStudio();
+  const [view, setView] = useState<View>('rack');
+
+  return (
+    <div className="app">
+      <WakeGate />
+
+      <header className="topbar">
+        <h1>
+          sloppy<span>_</span>knobs
+        </h1>
+        <nav className="view-switch" role="tablist" aria-label="View">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'rack'}
+            className={view === 'rack' ? 'is-active' : ''}
+            onClick={() => setView('rack')}
+          >
+            rack
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'code'}
+            className={view === 'code' ? 'is-active' : ''}
+            onClick={() => setView('code')}
+          >
+            code
+          </button>
+        </nav>
+      </header>
+
+      {ready && <Transport />}
+
+      <main className={`layout view-${view}`}>
+        <div className="pane pane-code">
+          <Editor />
+        </div>
+        <div className="pane pane-rack">
+          <Rack />
+        </div>
+        <div className="pane pane-library">
+          <Library />
+        </div>
+      </main>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <StudioProvider>
+      <Studio />
+    </StudioProvider>
+  );
+}

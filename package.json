@@ -1,5 +1,5 @@
 {
-  "name": "sk-tmp",
+  "name": "sloppy-knobs",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "react": "^19.2.8",
@@ -22,5 +24,6 @@
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
     "vitest": "^3.2.7"
-  }
+  },
+  "description": "An audio coding language with knobs on \u2014 mangle voice notes and found sound in the browser."
 }
