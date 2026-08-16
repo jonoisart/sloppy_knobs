@@ -39,10 +39,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [masterGain, setMasterGainState] = useState(0.9);
   const [positions, setPositions] = useState<Record<string, number>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  // Decoded buffers live in the engine, not in React. This counter is what
+  // tells the waveforms and the library that the set of decoded samples moved.
+  const [sampleVersion, setSampleVersion] = useState(0);
 
   const graphRef = useRef<LiveGraph | null>(null);
   const appliedRef = useRef<CompiledProgram | null>(null);
   const saveTimer = useRef<number | null>(null);
+
+  const bumpSamples = useCallback(() => setSampleVersion((v) => v + 1), []);
 
   const knownSamples = useMemo(() => library.map((s) => s.name), [library]);
   const evaluated = useMemo(() => evaluate(source, { knownSamples }), [source, knownSamples]);
@@ -95,7 +100,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     setEngineState('starting');
     try {
       await engine.start();
-      setEngineState('ready');
 
       const stored = await idb.allSamples();
       for (const sample of stored) {
@@ -113,11 +117,17 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       graphRef.current = graph;
       appliedRef.current = null;
       engine.setMasterGain(masterGain);
+
+      // Both of these must land after the graph exists and the samples are
+      // decoded. The build effect keys off `engineState`, so flipping it early
+      // would run the effect against a null graph and never run it again.
+      bumpSamples();
+      setEngineState('ready');
     } catch (err) {
       setEngineState('failed');
       setBootError(err instanceof Error ? err.message : String(err));
     }
-  }, [masterGain]);
+  }, [bumpSamples, masterGain]);
 
   // Build or patch the graph whenever the compiled program changes.
   useEffect(() => {
@@ -206,18 +216,20 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         }
       }
       setBusy(null);
+      bumpSamples();
       await refreshLibrary();
     },
-    [evaluated.compiled, refreshLibrary],
+    [bumpSamples, evaluated.compiled, refreshLibrary],
   );
 
   const removeSample = useCallback(
     async (name: string) => {
       await idb.deleteSample(name);
       engine.removeSample(name);
+      bumpSamples();
       await refreshLibrary();
     },
-    [refreshLibrary],
+    [bumpSamples, refreshLibrary],
   );
 
   // ---------------------------------------------------------- recording
@@ -348,6 +360,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     masterGain,
     setMasterGain,
     positions,
+    sampleVersion,
     graph: graphRef.current,
     setNodeParam,
     setNodeMode,

@@ -20,9 +20,11 @@ export interface WaveformProps {
 export function Waveform({ deckName, sample, height = 72 }: WaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [scrubbing, setScrubbing] = useState(false);
-  const { positions, graph } = useStudio();
+  const { positions, graph, sampleVersion } = useStudio();
   const position = positions[deckName] ?? 0;
-  const buffer = sample ? engine.getSample(sample) : undefined;
+  // Read through `sampleVersion` so a sample decoded after this first rendered
+  // (on reload, say) still gets drawn.
+  const buffer = sample && sampleVersion >= 0 ? engine.getSample(sample) : undefined;
 
   useEffect(() => {
     const canvas = canvasRef.current;

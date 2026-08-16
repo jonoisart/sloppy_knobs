@@ -57,7 +57,7 @@ function useMicRecorder(onDone: (file: File) => void) {
 }
 
 export function Library() {
-  const { library, addFiles, removeSample, busy, ready, source, setSource, notice } = useStudio();
+  const { library, addFiles, removeSample, busy, ready, source, setSource, notice, sampleVersion } = useStudio();
   const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
@@ -128,7 +128,7 @@ export function Library() {
       <ul className="sample-list">
         {library.length === 0 && <li className="dim">nothing loaded yet</li>}
         {library.map((sample) => {
-          const decoded = !!engine.getSample(sample.name);
+          const decoded = sampleVersion >= 0 && !!engine.getSample(sample.name);
           return (
             <li key={sample.name} className={decoded ? '' : 'is-undecoded'}>
               <button

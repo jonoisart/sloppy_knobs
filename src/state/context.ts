@@ -46,6 +46,8 @@ export interface StudioValue {
   setMasterGain: (value: number) => void;
 
   positions: Record<string, number>;
+  /** Bumped whenever the set of decoded samples changes, to force a redraw. */
+  sampleVersion: number;
   graph: LiveGraph | null;
 
   /** Write a param change back into the source text. */
