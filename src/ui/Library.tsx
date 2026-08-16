@@ -9,7 +9,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDuration } from '../audio/peaks';
 import { engine } from '../audio/engine';
+import { claimRecordingSession, releaseRecordingSession } from '../audio/session';
 import { useStudio } from '../state/context';
+
+/**
+ * Browsers disagree about what a MediaRecorder produces: Chrome and Firefox
+ * give WebM, iOS Safari gives MP4. Ask rather than assume, so the file we store
+ * is not named after a container it is not in.
+ */
+const CANDIDATE_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac'];
+
+function pickMimeType(): string | undefined {
+  if (typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) return undefined;
+  return CANDIDATE_TYPES.find((type) => MediaRecorder.isTypeSupported(type));
+}
+
+function extensionFor(mimeType: string): string {
+  if (mimeType.includes('mp4')) return 'm4a';
+  if (mimeType.includes('aac')) return 'aac';
+  if (mimeType.includes('ogg')) return 'ogg';
+  return 'webm';
+}
 
 function useMicRecorder(onDone: (file: File) => void) {
   const [recording, setRecording] = useState(false);
@@ -25,24 +45,33 @@ function useMicRecorder(onDone: (file: File) => void) {
   const start = useCallback(async () => {
     setError(null);
     try {
+      // The session has to allow recording, or iOS will not hand over the mic
+      // while the playback session is held.
+      claimRecordingSession();
       const stream = await navigator.mediaDevices.getUserMedia({
+        // Leave the processing off: it is tuned for speech clarity and will
+        // fight anything textural you are trying to capture.
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
-      const mr = new MediaRecorder(stream);
+      const mimeType = pickMimeType();
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunks.current = [];
       mr.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.current.push(e.data);
       };
       mr.onstop = () => {
-        const blob = new Blob(chunks.current, { type: mr.mimeType || 'audio/webm' });
+        const type = mr.mimeType || mimeType || 'audio/webm';
+        const blob = new Blob(chunks.current, { type });
         const stamp = new Date().toISOString().slice(11, 19).replace(/:/g, '');
-        onDone(new File([blob], `take-${stamp}.webm`, { type: blob.type }));
+        onDone(new File([blob], `take-${stamp}.${extensionFor(type)}`, { type }));
         stream.getTracks().forEach((t) => t.stop());
+        releaseRecordingSession();
       };
       mr.start();
       recorder.current = mr;
       setRecording(true);
     } catch (err) {
+      releaseRecordingSession();
       setError(
         err instanceof Error && err.name === 'NotAllowedError'
           ? 'Microphone permission denied.'

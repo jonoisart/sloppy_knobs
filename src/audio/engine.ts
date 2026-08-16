@@ -6,6 +6,7 @@
  * else in the app treats `ready` as the gate.
  */
 
+import { claimPlaybackSession } from './session';
 import { concatChunks, encodeWav } from './wav';
 
 const WORKLET_MODULES = ['granular-processor.js', 'fx-processors.js'];
@@ -73,6 +74,10 @@ export class Engine {
       window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!Ctor) throw new Error('This browser has no Web Audio support.');
 
+    // Before the context exists, so the session type applies to it from the
+    // start. Without this an iPhone's silent switch mutes everything.
+    claimPlaybackSession();
+
     const ctx = new Ctor({ latencyHint: 'interactive' });
     this.ctx = ctx;
 
@@ -109,7 +114,8 @@ export class Engine {
   }
 
   async resume(): Promise<void> {
-    if (this.ctx && this.ctx.state === 'suspended') await this.ctx.resume();
+    // iOS also reports a non-standard 'interrupted' state after a call.
+    if (this.ctx && this.ctx.state !== 'running') await this.ctx.resume().catch(() => undefined);
   }
 
   setMasterGain(value: number): void {

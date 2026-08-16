@@ -38,10 +38,61 @@ a user gesture, so the app waits for one instead of silently making no sound.
 | `npm test` | language unit tests |
 | `npm run lint` | oxlint |
 | `npm run e2e` | drives the real app in Chromium (needs `npm run dev` running) |
+| `npm run build:pages` | production build at the GitHub Pages base path, then checks it |
+| `npm run e2e:built` | drives the *built* app (needs `vite preview` — see below) |
+| `npm run icons` | regenerates the PWA icons from the SVG |
 
 Nothing you load leaves the device. Samples and the current patch are kept in
 IndexedDB, so a reload picks up where you left off, and the whole thing deploys
 as a static site.
+
+## On your phone
+
+Open the deployed URL in Safari or Chrome, then **Share → Add to Home Screen**.
+It installs as a standalone app — no browser chrome — and works offline, since
+everything it needs is cached and everything it stores is already local.
+
+Three platform rules shape how it behaves on a phone, all handled in
+`src/audio/session.ts`:
+
+- **The silent switch.** iOS treats web audio as "ambient" by default, which
+  means the physical ring/silent switch mutes it. The app claims a `playback`
+  audio session so that no longer applies. Your volume buttons still do.
+- **Interruptions.** A call, a notification or locking the phone suspends the
+  audio context, and the browser will not resume it. The app resumes on its own
+  when you come back.
+- **Sleep.** The screen is kept awake while the transport is running, and
+  released when you stop.
+
+The microphone needs HTTPS, which any of the deploy targets below provide. It
+will not work over plain `http://` from another machine on your network.
+
+## Deploying
+
+Set up once:
+
+1. Merge to `main` — the workflow deploys from there.
+2. **Settings → General → Change visibility → Public.** GitHub Pages only
+   serves private repos on a paid plan.
+3. **Settings → Pages → Source: GitHub Actions.**
+
+After that every push to `main` runs lint, tests and a build, and republishes.
+The site lands at `https://<user>.github.io/sloppy_knobs/`.
+
+The base path is the one thing that differs between local and Pages, so it
+comes from `VITE_BASE` (`vite.config.ts`) and the workflow sets it from the
+repo name. `npm run check:dist` fails the build if anything in the output would
+404 under that path — including the worklets, which are fetched at runtime and
+so cannot be caught by the bundler. That failure mode is a page that loads fine
+and makes no sound, which is worth a CI check.
+
+To test the deployable artifact exactly as it will be served:
+
+```sh
+npm run build:pages
+VITE_BASE=/sloppy_knobs/ npx vite preview --port 4173
+E2E_URL=http://localhost:4173/sloppy_knobs/ npm run e2e:built
+```
 
 ## Why not SuperCollider
 
@@ -133,8 +184,16 @@ it captures from the microphone straight into the library.
 recovery, byte-exact edit round trips, diagnostics landing on the right line,
 and the patch-vs-rebuild diff.
 
-`npm run e2e` drives the built app in Chromium with a fake audio device and
-asserts on audio that actually came out — that the worklets load, a file
-decodes and draws, the graph produces a non-silent master signal that stays
-finite, a knob rewrites the source without disturbing the rest of it, editing
-the source moves the knob, and the exported WAV is a valid, audible file.
+`npm run e2e` drives the app in Chromium with a fake audio device and asserts on
+audio that actually came out — that the worklets load, a file decodes and draws,
+the graph produces a non-silent master signal that stays finite, a knob rewrites
+the source without disturbing the rest of it, editing the source moves the knob,
+and the exported WAV is a valid, audible file.
+
+`npm run e2e:built` runs the same suite against a production build served from
+its real base path, and adds the deployment-specific checks: the manifest
+installs as a standalone app, the service worker activates, and after the
+network is cut the app still loads *and* can still reach its worklets.
+
+Not covered by any of it: the iOS silent switch and the home-screen icon.
+Emulated Chromium cannot reproduce either, so those need a real phone.

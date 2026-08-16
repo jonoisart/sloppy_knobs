@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { engine, type EngineState } from '../audio/engine';
+import { holdWakeLock, releaseWakeLock, watchInterruptions } from '../audio/session';
 import { LiveGraph } from '../audio/graph';
 import { fromKnob } from '../audio/fx';
 import { StudioContext, type LibraryEntry, type StudioValue } from './context';
@@ -157,12 +158,24 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     if (graph.isPlaying) {
       graph.stop();
       setPlaying(false);
+      void releaseWakeLock();
     } else {
       void engine.resume();
       graph.play();
       setPlaying(true);
+      // Stop the phone sleeping in the middle of a take.
+      void holdWakeLock();
     }
   }, []);
+
+  // Coming back from a call, a notification or a lock leaves the context
+  // suspended, and nothing resumes it on its own.
+  useEffect(() => {
+    if (engineState !== 'ready') return;
+    return watchInterruptions(() => {
+      void engine.resume();
+    });
+  }, [engineState]);
 
   const setMasterGain = useCallback((value: number) => {
     setMasterGainState(value);

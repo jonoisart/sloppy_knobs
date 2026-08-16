@@ -9,6 +9,13 @@
       content="An audio coding language with knobs on. Load voice notes and found sound, then mangle them live in the browser."
     />
     <meta name="mobile-web-app-capable" content="yes" />
+    <!-- iOS reads these rather than the manifest when adding to the home
+         screen: without them the app opens in Safari chrome with a screenshot
+         for an icon. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="sloppy" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>sloppy_knobs</title>
   </head>

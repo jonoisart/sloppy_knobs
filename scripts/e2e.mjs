@@ -13,6 +13,16 @@ import { join } from 'node:path';
 const BASE = process.env.E2E_URL ?? 'http://localhost:4173';
 const SHOTS = 'artifacts';
 
+/**
+ * `--built` runs against a production build served from its real base path,
+ * rather than the dev server. Two probes read the engine by importing the
+ * module directly, which only exists unbundled in dev; in built mode those are
+ * skipped and audio is proven through the WAV export instead, which needs no
+ * module access. The service worker only exists in a build, so its checks run
+ * only here.
+ */
+const BUILT = process.argv.includes('--built');
+
 const results = [];
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail });
@@ -81,9 +91,10 @@ await page.waitForFunction(() => !document.querySelector('.gate'), null, { timeo
 check('audio context and worklets start from a user gesture', true);
 
 const workletsLoaded = await page.evaluate(async () => {
+  // Relative to the document, so this follows the base path in built mode.
   const r = await Promise.all([
-    fetch('/worklets/granular-processor.js').then((x) => x.ok),
-    fetch('/worklets/fx-processors.js').then((x) => x.ok),
+    fetch('worklets/granular-processor.js').then((x) => x.ok),
+    fetch('worklets/fx-processors.js').then((x) => x.ok),
   ]);
   return r.every(Boolean);
 });
@@ -122,31 +133,45 @@ check('waveform renders the decoded sample', waveformDrawn);
 await page.getByRole('button', { name: /play/ }).click();
 await page.waitForTimeout(1500);
 
-const level = await page.evaluate(async () => {
-  // Read the master analyser the app already owns.
-  const { engine } = await import('/src/audio/engine.ts');
-  let peak = 0;
-  for (let i = 0; i < 30; i++) {
-    peak = Math.max(peak, engine.levels().peak);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  return peak;
-});
-check('the graph makes sound', level > 0.001, `master peak ${level.toFixed(4)}`);
-
-const finite = await page.evaluate(async () => {
-  const { engine } = await import('/src/audio/engine.ts');
-  const data = new Float32Array(2048);
-  for (let i = 0; i < 20; i++) {
-    engine.scope(data);
-    for (const v of data) {
-      if (!Number.isFinite(v) || Math.abs(v) > 4) return false;
+if (!BUILT) {
+  const level = await page.evaluate(async () => {
+    // Read the master analyser the app already owns.
+    const { engine } = await import('/src/audio/engine.ts');
+    let peak = 0;
+    for (let i = 0; i < 30; i++) {
+      peak = Math.max(peak, engine.levels().peak);
+      await new Promise((r) => setTimeout(r, 50));
     }
-    await new Promise((r) => setTimeout(r, 50));
-  }
-  return true;
-});
-check('output stays finite and in range (no NaN or runaway feedback)', finite);
+    return peak;
+  });
+  check('the graph makes sound', level > 0.001, `master peak ${level.toFixed(4)}`);
+
+  const finite = await page.evaluate(async () => {
+    const { engine } = await import('/src/audio/engine.ts');
+    const data = new Float32Array(2048);
+    for (let i = 0; i < 20; i++) {
+      engine.scope(data);
+      for (const v of data) {
+        if (!Number.isFinite(v) || Math.abs(v) > 4) return false;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return true;
+  });
+  check('output stays finite and in range (no NaN or runaway feedback)', finite);
+} else {
+  // No module access in a build; the meter element reflects the same analyser.
+  const metered = await page.evaluate(async () => {
+    let widest = 0;
+    for (let i = 0; i < 30; i++) {
+      const el = document.querySelector('.meter-rms');
+      widest = Math.max(widest, parseFloat(el?.style.width ?? '0') || 0);
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return widest;
+  });
+  check('the graph makes sound', metered > 0.5, `master meter reached ${metered.toFixed(1)}%`);
+}
 
 await page.screenshot({ path: join(SHOTS, 'desktop.png'), fullPage: false });
 
@@ -247,15 +272,15 @@ check('a restored sample is drawn after reload', redrawn);
 await page.getByRole('button', { name: /play/ }).click();
 await page.waitForTimeout(1200);
 const reloadLevel = await page.evaluate(async () => {
-  const { engine } = await import('/src/audio/engine.ts');
-  let peak = 0;
+  let widest = 0;
   for (let i = 0; i < 20; i++) {
-    peak = Math.max(peak, engine.levels().peak);
+    const el = document.querySelector('.meter-rms');
+    widest = Math.max(widest, parseFloat(el?.style.width ?? '0') || 0);
     await new Promise((r) => setTimeout(r, 50));
   }
-  return peak;
+  return widest;
 });
-check('the graph builds and plays after reload', reloadLevel > 0.001, `master peak ${reloadLevel.toFixed(4)}`);
+check('the graph builds and plays after reload', reloadLevel > 0.5, `master meter ${reloadLevel.toFixed(1)}%`);
 
 // -------------------------------------------------------------- mobile
 
@@ -274,6 +299,65 @@ await mobile.screenshot({ path: join(SHOTS, 'mobile-rack.png') });
 await mobile.getByRole('tab', { name: 'code' }).click();
 await mobile.waitForTimeout(200);
 await mobile.screenshot({ path: join(SHOTS, 'mobile-code.png') });
+
+// ------------------------------------------------- installable / offline
+
+// Emulated Chromium, not real Safari — this checks the install metadata is
+// present and correct, not how iOS renders it. The silent switch and the
+// home-screen icon still need a real device.
+const install = await mobile.evaluate(async () => {
+  const manifestHref = document.querySelector('link[rel=manifest]')?.getAttribute('href');
+  const appleIcon = document.querySelector('link[rel=apple-touch-icon]')?.getAttribute('href');
+  const result = { manifestHref, appleIcon, manifest: null, appleIconOk: false };
+  if (manifestHref) {
+    const res = await fetch(manifestHref);
+    if (res.ok) result.manifest = await res.json();
+  }
+  if (appleIcon) result.appleIconOk = (await fetch(appleIcon)).ok;
+  return result;
+});
+
+// The apple-touch-icon is hand-written into index.html, so it exists in both
+// modes. The manifest and service worker are generated at build time only.
+check('the apple-touch-icon resolves', install.appleIconOk, install.appleIcon ?? 'no link');
+
+if (BUILT) {
+  check('the manifest is linked and loads', !!install.manifest, install.manifestHref ?? 'no link');
+  check(
+    'the manifest installs as a standalone app',
+    install.manifest?.display === 'standalone' && (install.manifest?.icons?.length ?? 0) >= 2,
+    `display=${install.manifest?.display}, ${install.manifest?.icons?.length ?? 0} icons`,
+  );
+  check(
+    'start_url is relative, so it survives the base path',
+    typeof install.manifest?.start_url === 'string' && !install.manifest.start_url.startsWith('/'),
+    `start_url=${install.manifest?.start_url}`,
+  );
+
+  const swState = await mobile.evaluate(async () => {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return 'none';
+    await navigator.serviceWorker.ready;
+    return reg.active?.state ?? 'pending';
+  });
+  check('the service worker activates', swState === 'activated', `state: ${swState}`);
+
+  // The real test of offline: cut the network, reload, and see if it still
+  // boots *and* can still reach the worklets.
+  await context.setOffline(true);
+  await mobile.reload({ waitUntil: 'domcontentloaded' });
+  const offlineOk = await mobile.evaluate(async () => {
+    const gate = !!document.querySelector('.gate-card');
+    const worklets = await Promise.all([
+      fetch('worklets/granular-processor.js').then((r) => r.ok).catch(() => false),
+      fetch('worklets/fx-processors.js').then((r) => r.ok).catch(() => false),
+    ]);
+    return { gate, worklets: worklets.every(Boolean) };
+  });
+  check('the app still loads with no network', offlineOk.gate);
+  check('the worklets are cached, so offline audio still works', offlineOk.worklets);
+  await context.setOffline(false);
+}
 
 check('no uncaught errors in the console', consoleErrors.length === 0, consoleErrors.slice(0, 2).join(' | '));
 
